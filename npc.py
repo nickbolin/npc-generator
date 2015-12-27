@@ -1,112 +1,20 @@
-import random, sys, psycopg2
-import character, dndb
+import random, sys
+import character, dndb, namegen
+
+"""
+NPC class and generator for the DnD 4E name generator.
+"""
 
 # Alignments for characters
 alignments = ['Lawful Good', 'Lawful Evil', 'Lawful Neutral', 'Chaotic Neutral', 'Chaotic Evil', 'Chaotic Good', 'Good', 'Evil', 'True Neutral']
-
-"""
-Generates a name for our character.
-Like all race-specific name generator methods, this returns a dict structure with 'name' and 'meaning' fields.
-"""
-def gen_name(gender, race):
-	cur = dndb.connect_to_names() # get cursor for requests
-
-	gend = 'male' if gender == 0 else 'female'
-
-	if race == 'Half-elf':					# check multirace cases
-		races = "Elf%\' OR race LIKE \'%" + "Human"
-	elif race == 'Half-orc':
-		races = "Orc%\' OR race LIKE \'%" + "Human"
-	elif race == 'Dwarf':					# or non-conventional names
-		return dwarf_name(gender)			# dwarves have two part first names and clan names
-	elif race == 'Gnome':
-		return gnome_name(gender)
-	else:
-		races = race
-
-	request = "SELECT name, meaning FROM names WHERE gender = \'" + gend + "\' AND race LIKE \'%" + races + "%\'"
-	dndb.make_request(cur, request)
-	rows = cur.fetchall()
-
-	return random.choice(rows) if rows else {'name': 'No name', 'meaning': 'pregnant whale'}
-
-"""
-Creates a dwarven name in standard dwarven custom. There are neuter prefixes, and gender determines the suffix.
-Returns a dict with 'name' and 'meaning' as their respective values.
-"""
-def dwarf_name(gender):
-	cur = dndb.connect_to_names() # get cursor for requests
-
-	request = "SELECT name, meaning FROM names WHERE type = \'prefix\' AND race LIKE \'%" + "Dwarf%\'"
-	dndb.make_request(cur, request)
-	rows = cur.fetchall() # get all possible prefixes
-
-	index = random.randint(0, len(rows) - 1)
-	prefix = (rows[index])[0].strip() # pick a random prefix and trim its whitespace
-	pre_mean = (rows[index])[1].strip() # pick that same prefix's meaning
-
-	gend = 'male' if gender == 0 else 'female'
-	request = "SELECT name, meaning FROM names WHERE type = \'suffix\' AND gender = \'" + gend + "\' AND race LIKE \'%" + "Dwarf%\'"
-	dndb.make_request(cur, request)
-	rows = cur.fetchall() # get all possible suffixes for our gender
-	
-	index = random.randint(0, len(rows) - 1)
-	suffix = (rows[index])[0].strip() # pick a random suffix and trim whitespace
-	suf_mean = (rows[index])[1].strip()
-
-	return {'name': prefix + suffix, 'meaning': pre_mean + " " + suf_mean}
-
-"""
-Creates a gnomish name in gnomish custom. 
-"""
-def gnome_name(gender):
-	cur = dndb.connect_to_names() # get cursor for requests
-
-	nicknamed = False
-	roll = random.randint(1, 10) # d10 roll
-	if roll <= 4:
-		count = 1	# 1-4 gets short name
-	elif roll <= 7:	# 5-7 gets regular name
-		count = 2
-	elif roll <= 9:
-		nicknamed = True
-		count = 2	# 8-9 gets a nickname with their name
-	elif roll == 10:	# 10 gets long name
-		count = 3
-
-	curr_name = ""
-	curr_mean = ""
-
-	for x in range(0, count):
-		request = "SELECT name, meaning FROM names WHERE type = \'fragment\' AND race LIKE \'%" + "Gnome%\'"
-		dndb.make_request(cur, request)
-		rows = cur.fetchall()
-
-		index = random.randint(0, len(rows) - 1)
-		curr_name += (rows[index])[0].strip().lower() # pick a random fragment and trim whitespace
-		curr_mean += (rows[index])[1].strip() + " " # get meaning
-	
-	curr_name = curr_name.capitalize()
-
-	if nicknamed:
-		request = "SELECT name, meaning FROM names WHERE type = \'suffix\' AND race LIKE \'%" + "Gnome%\'"
-		dndb.make_request(cur, request)
-		rows = cur.fetchall()
-
-		index = random.randint(0, len(rows) - 1)
-		curr_name += " \"" + (rows[index])[0].strip() + "\"" # pick a random nickname and trim whitespace
-		# curr_mean += (rows[index])[1].strip() # get meaning for the nickname (if we want to?)
-	else:
-		curr_mean = curr_mean.strip()
-		curr_name = curr_name.strip() # eliminate trailing spaces
-
-	return {'name': curr_name, 'meaning': curr_mean}
 
 """
 NPC class for generation. Extends functionality of Character class with added notes for NPCs.
 """	
 class NonPC(character.Character):
 	def __init__(self):
+		self.gen = namegen.NameGenerator()
+
 		super(NonPC, self).__init__() # call Character initializer
 		self.commoner = None	# boolean to determine if character is an adventurer or commoner
 		self.alighment = None 	# lawful, evil, good, neutral, etc
@@ -148,7 +56,7 @@ class NonPC(character.Character):
 			self.gender = character.genders[gender]
 
 		# generate name based on gender and race
-		name_dict = gen_name(self.gender, self.race) 
+		name_dict = self.gen.gen_name(self.gender, self.race) 
 
 		self.name = name_dict['name']
 		self.meaning = name_dict['meaning']
