@@ -39,8 +39,8 @@ class NameGenerator():
 	"""
 	def dwarf_name(self, gender):
 		name_dict = self.db.get_name_segment(race='Dwarf', n_type='prefix')
-		curr_name += name_dict['name']
-		curr_mean += name_dict['meaning']
+		curr_name = name_dict['name']
+		curr_mean = name_dict['meaning']
 
 		name_dict = self.db.get_name_segment(race='Dwarf', n_type='suffix', gender=gender)
 		curr_name += name_dict['name'] # pick a random suffix and trim whitespace
