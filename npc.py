@@ -5,39 +5,130 @@ import psycopg2
 # Alignments for characters
 alignments = ['Lawful Good', 'Lawful Evil', 'Lawful Neutral', 'Chaotic Neutral', 'Chaotic Evil', 'Chaotic Good', 'Good', 'Evil', 'True Neutral']
 
-def gen_name(gender, race):
+"""
+Makes request of given string to database.
+"""
+def make_request(cur, request):
+	try:
+		cur.execute(request)
+	except:
+		print "Selection failed: " + request # let us know where we failed on the select
+		sys.exit()
+
+"""
+Connect to database with provided credentials and return a connection to it.
+"""
+def connect_to_names():
 	try: # connect to the db
 		conn = psycopg2.connect("host='localhost' dbname='dnd' user='postgres' password='db_pass'")
 	except:
 		print "Unable to connect to the database."	# terminate early if connection fails
 		sys.exit()
+	return conn
 
+"""
+Generates a name for our character.
+Like all race-specific name generator methods, this returns a dict structure with 'name' and 'meaning' fields.
+"""
+def gen_name(gender, race):
+	conn = connect_to_names()
 	cur = conn.cursor() # get cursor for requests
 
 	gend = 'male' if gender == 0 else 'female'
 
-	if race == 'Half-elf':
-		races = "Elf%\' OR \'%" + "Human"
+	if race == 'Half-elf':					# check multirace cases
+		races = "Elf%\' OR race LIKE \'%" + "Human"
 	elif race == 'Half-orc':
-		races = "Orc%\' OR \'%" + "Human"
+		races = "Orc%\' OR race LIKE \'%" + "Human"
+	elif race == 'Dwarf':					# or non-conventional names
+		return dwarf_name(gender)			# dwarves have two part first names and clan names
+	elif race == 'Gnome':
+		return gnome_name(gender)
 	else:
 		races = race
 
-	request = "SELECT name FROM names WHERE gender = \'" + gend + "\' AND race LIKE \'%" + races + "%\'"
-
-	try:
-		cur.execute(request)
-	except:
-		print "Selection failed"
-		sys.exit()
-
+	request = "SELECT name, meaning FROM names WHERE gender = \'" + gend + "\' AND race LIKE \'%" + races + "%\'"
+	make_request(cur, request)
 	rows = cur.fetchall()
 
-	return random.choice(rows)[0].strip() if rows else 'No name'
-
+	return random.choice(rows) if rows else {'name': 'No name', 'meaning': 'pregnant whale'}
 
 """
-NPC class for generation. Can eventually should be adapted for PCs
+Creates a dwarven name in standard dwarven custom. There are neuter prefixes, and gender determines the suffix.
+Returns a dict with 'name' and 'meaning' as their respective values.
+"""
+def dwarf_name(gender):
+	conn = connect_to_names()
+	cur = conn.cursor() # get cursor for requests
+
+	request = "SELECT name, meaning FROM names WHERE type = \'prefix\' AND race LIKE \'%" + "Dwarf%\'"
+	make_request(cur, request)
+	rows = cur.fetchall() # get all possible prefixes
+
+	index = random.randint(0, len(rows) - 1)
+	prefix = (rows[index])[0].strip() # pick a random prefix and trim its whitespace
+	pre_mean = (rows[index])[1].strip() # pick that same prefix's meaning
+
+	gend = 'male' if gender == 0 else 'female'
+	request = "SELECT name, meaning FROM names WHERE type = \'suffix\' AND gender = \'" + gend + "\' AND race LIKE \'%" + "Dwarf%\'"
+	make_request(cur, request)
+	rows = cur.fetchall() # get all possible suffixes for our gender
+	
+	index = random.randint(0, len(rows) - 1)
+	suffix = (rows[index])[0].strip() # pick a random suffix and trim whitespace
+	suf_mean = (rows[index])[1].strip()
+
+	return {'name': prefix + suffix, 'meaning': pre_mean + " " + suf_mean}
+
+"""
+Creates a gnomish name in gnomish custom. 
+"""
+def gnome_name(gender):
+	conn = connect_to_names()
+	cur = conn.cursor() # get cursor for requests
+
+	nicknamed = False
+	roll = random.randint(1, 10) # d10 roll
+	if roll <= 4:
+		count = 1	# 1-4 gets short name
+	elif roll <= 7:	# 5-7 gets regular name
+		count = 2
+	elif roll <= 9:
+		nicknamed = True
+		count = 2	# 8-9 gets a nickname with their name
+	elif roll == 10:	# 10 gets long name
+		count = 3
+
+	curr_name = ""
+	curr_mean = ""
+
+	for x in range(0, count):
+		request = "SELECT name, meaning FROM names WHERE type = \'fragment\' AND race LIKE \'%" + "Gnome%\'"
+		make_request(cur, request)
+		rows = cur.fetchall()
+
+		index = random.randint(0, len(rows) - 1)
+		curr_name += (rows[index])[0].strip().lower() # pick a random fragment and trim whitespace
+		curr_mean += (rows[index])[1].strip() + " " # get meaning
+	
+	curr_name = curr_name.capitalize()
+
+	if nicknamed:
+		request = "SELECT name, meaning FROM names WHERE type = \'suffix\' AND race LIKE \'%" + "Gnome%\'"
+		make_request(cur, request)
+		rows = cur.fetchall()
+
+		index = random.randint(0, len(rows) - 1)
+		curr_name += " \"" + (rows[index])[0].strip() + "\"" # pick a random nickname and trim whitespace
+		curr_mean += (rows[index])[1].strip() # get meaning
+	else:
+		curr_mean = curr_mean.strip()
+		curr_name = curr_name.strip() # eliminate trailing spaces
+
+	return {'name': curr_name, 'meaning': curr_mean}
+
+"""
+NPC class for generation. Extends functionality of Character class with added notes for NPCs.
 """	
 class NonPC(character.Character):
 	def __init__(self):
@@ -45,13 +136,13 @@ class NonPC(character.Character):
 		self.commoner = None	# boolean to determine if character is an adventurer or commoner
 		self.alighment = None 	# lawful, evil, good, neutral, etc
 		
-
 	"""
 	Creates an NPC on a few criteria
 	commoner = boolean for commoner status
 	gender = male/female etc.
 	race = Elf, Halfling, etc.
 	level = selbstverstandlich
+	meaning = name meaning (this is generated by the method, as is the name)
 	"""
 	def generate_npc(self, commoner=None, gender=None, race=None, level=None):
 		# generate basic demographics as needed
@@ -73,7 +164,10 @@ class NonPC(character.Character):
 			self.gender = character.genders[gender]
 
 		# generate name based on gender and race
-		self.name = gen_name(self.gender, self.race) 
+		name_dict = gen_name(self.gender, self.race) 
+
+		self.name = name_dict['name']
+		self.meaning = name_dict['meaning']
 
 		# generate alighment
 		self.alignment = random.choice(alignments)
@@ -90,69 +184,23 @@ class NonPC(character.Character):
 		self.add_racial_stat_bonus()
 		self.add_level_stat_bonus()
 
-		# consider physical description/personality
+		# consider physical description/personality selections
+		#	place of origin
+		#	organizations
+		#	motivations
+		#	background
 
-	"""Adds stat bonuses depending on races."""
-	def add_racial_stat_bonus(self):
-		if self.race == 'Dragonborn':
-			self.stats['STR'] += 2
-			self.stats['CHA'] += 2
-		elif self.race == 'Dwarf':
-			self.stats['CON'] += 2
-			self.stats['WIS'] += 2
-		elif self.race == 'Eladrin':
-			self.stats['DEX'] += 2
-			self.stats['INT'] += 2
-		elif self.race == 'Elf':
-			self.stats['DEX'] += 2
-			self.stats['WIS'] += 2
-		elif self.race == 'Half-elf':
-			self.stats['CON'] += 2
-			self.stats['CHA'] += 2
-		elif self.race == 'Halfling':
-			self.stats['DEX'] += 2
-			self.stats['CHA'] += 2
-		elif self.race == 'Human':
-			self.stats['STR'] += 2
-		elif self.race == 'Tiefling': # TODO: add other PC races
-			self.stats['INT'] += 2
-			self.stats['CHA'] += 2
-
-	"""Adds stat bonuses depending on current character level."""
-	def add_level_stat_bonus(self):
-		points = 0
-		if self.level >= 28: 	# determine number of points to distribute
-			points += 12
-		elif self.level >= 24:
-			points += 10
-		elif self.level >= 18:
-			points += 8
-		elif self.level >= 14:
-			points += 6
-		elif self.level >= 8:
-			points += 4
-		elif self.level >= 4:
-			points += 2
-
-		if self.level >= 21:	# at each of level 21 and 11 increase each score by 1
-			for key in self.stats:
-				self.stats[key] += 2
-		elif self.level >= 11:
-			for key in self.stats:
-				self.stats[key] += 1
-
-		for x in range(points):	# distribute the points
-			index = random.randint(0, 5)
-			self.stats[character.stat_lookup[index]] += 1 # TODO: make this not random?
-
-
-	"""Stringify our character in a nice way"""
+	"""
+	Stringify our character in a nice way
+	"""
 	def __str__(self):
 		# print name and basic race, level, class info
 		result = self.name + " is a level " + str(self.level) + " " + self.race + " " + self.profession + ".\n"
-		# alignment 
+		# alignment and name meaning (these fields are not included in Character)
 		pronoun = 'He' if self.gender == 0 else 'She'
 		result += pronoun + " is considered " + self.alignment + ".\n"
+		pos_pronoun = 'His' if self.gender == 0 else 'Her'
+		result += pos_pronoun + " name means " + self.meaning + ".\n"
 		# add stats
 		result += "STR: " + str(self.stats['STR']) + " CON: " + str(self.stats['CON']) + " DEX: " + str(self.stats['DEX']) + " INT: " + str(self.stats['INT']) + " WIS: " + str(self.stats['WIS']) + " CHA: " + str(self.stats['CHA']) + ". "
 		# insert remainder of demographics (personality, physical appearance, etc)
